@@ -1,0 +1,9 @@
+# PSEUDO CODE FOR IDENTIFYING COVID-STATUS
+
+FOR cxr in dataset
+    IF cxr covid-status is positive THEN
+        FIND date of positive swabs
+            LIST dates 14 days before and 14 days after positive swabs
+    
+    IF cxr acquisition in list of dates THEN
+        cxr = covid-positive
