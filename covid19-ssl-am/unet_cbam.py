@@ -139,9 +139,8 @@ class UnetCBAM(Model):
         @staticmethod
         return ssim_loss # unsupervised, - supervised loss?
 
-
 # adapt into main training function
-def pretraining(nih):
+#def pretraining(nih):
     # ssl
     
 

@@ -140,20 +140,6 @@ def make_generators(model_type, train_df, val_df, test_df, params):
 
     return train_dg, val_dg, test_dg
 
-if __name__ == "__main__":
-   # DATA_PATH =
-  #  PARAMS_PATH = 
-
-    df = pd.read_csv(DATA_PATH)
-    params = pd.read_csv(PARAMS_PATH)
-    # for testing code
-    train_df = df[df['kfold_1']=="train"]
-    val_df = df[df["kfold_1"]=="val"]
-
-    train_df, val_dg, test_dg = make_generators('keras', train_df, val_df, params)
-
-    batchx, batchy = next(iter(train_df))
-
 
 
 

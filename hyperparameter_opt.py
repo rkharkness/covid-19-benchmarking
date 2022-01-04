@@ -3,6 +3,7 @@ import optuna
 from optuna.trial import TrialState
 
 import os
+import argparse
 
 import pandas as pd
 from dataloaders import make_generators
@@ -12,10 +13,6 @@ from torch import optim
 
 import keras
 from residual_attn.res_attn import AttentionResNet56
-from caps_net.covid_caps import capsule_net, margin_loss
-
-from utils import f1_m, precision_m, recall_m
-
 
 DEVICE = torch.device("cpu")
 
@@ -28,12 +25,7 @@ EPOCHS = 10
 LOG_INTERVAL = 10
 N_TRAIN_EXAMPLES = BATCHSIZE * 30
 N_VALID_EXAMPLES = BATCHSIZE * 10
-
 MODEL = AttentionResNet56
-# add these obj attributes and embed in code for functionality
-#MODEL_TYPE = AttentionResNet56.type
-#LOSS = AttentionResNet56.loss
-#OPTIMIZER = AttentionResNet56.loss
 
 class HyperOpt(torch.nn.Module):
     def __init__(self, model, data, dataloader) -> None:
@@ -52,8 +44,8 @@ class HyperOpt(torch.nn.Module):
         if m.model_type == 'keras':
             learning_rate =  trial.suggest_float("lr", 1e-5, 1e-1, log=True)
             opt = m.get_optimizer()
-            loss_fn = m.get_loss()
-            m.compile(optimizer=opt(lr=learning_rate), loss=loss_fn, metrics=['accuracy', f1_m, precision_m, recall_m])
+            loss_fn = m.get_loss_fn()
+            m.compile(optimizer=opt(lr=learning_rate), loss=loss_fn, metrics=['accuracy'])
             return m
         else:
             return m
@@ -79,7 +71,7 @@ class HyperOpt(torch.nn.Module):
 
             # Evaluate the model accuracy on the validation set.
             score = model.evaluate(x_val, y_val, verbose=0)
-            return score[1]
+            return score[0]
         
         else:
             # Generate the optimizers
@@ -99,7 +91,7 @@ class HyperOpt(torch.nn.Module):
 
                     optimizer.zero_grad()
                     output = model(data)
-                    loss_fn = model.get_loss()
+                    loss_fn = model.get_loss_fn()
                     loss = loss_fn(output, target)
                     
                     loss.backward()
@@ -117,40 +109,45 @@ class HyperOpt(torch.nn.Module):
                         output = model(data)
                         # Get the index of the max log-probability.
                         pred = output.argmax(dim=1, keepdim=True)
+                        val_loss = loss_fn(output, target)
                         correct += pred.eq(target.view_as(pred)).sum().item()
 
-                accuracy = correct / min(len(self.dataloader['val'].dataset), N_VALID_EXAMPLES)
+            #    accuracy = correct / min(len(self.dataloader['val'].dataset), N_VALID_EXAMPLES)
 
-                trial.report(accuracy, epoch)
+                trial.report(val_loss, epoch)
 
                 # Handle pruning based on the intermediate value.
                 if trial.should_prune():
                     raise optuna.exceptions.TrialPruned()
 
-            return accuracy
+            return val_loss
 
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Hyperparameter tuning')
+    parser.add_argument('--data_path', default='/MULTIX/DATA/INPUT/binary_data.csv', type=str, help='Path to data file')
+    parser.add_argument('--save_dir', type=str)
+    parser.add_argument('--model_name', type=str)
+    args = parser.parse_args('--')
 
-    data = pd.read_csv(PATH)
-    train_data = data[data['kfold_1'] == 'train']
-    val_data = data[data['kfold_1'] == 'val']
+    df = pd.read_csv(args.data_path)
+    train_df = df[df[f'kfold_1'] == "train"]
+    val_df = df[df[f'kfold_1'] == "val"]
+    test_df = df[df[f'kfold_1'] == 'test']
 
-    train_data = train_data[:N_TRAIN_EXAMPLES]
-    val_data = val_data[:N_VALID_EXAMPLES]
+    params = {'batchsize':12, 'num_workers':4}
 
-    data_dict = {'train':train_data, 'val': val_data}
-
-    make_generators()
-   # dataloader_dict = 
+    #make generators
+    train_loader, val_loader, test_loader = make_generators(train_df, val_df, test_df, params)
+    # create dict of dataloaders
+    data = {'train':train_df, 'val': val_df}
+    dataloaders = {'train':train_loader, 'val':val_loader}
 
     model = AttentionResNet56()
-    
-    h_optimization = HyperOpt(model, data_dict, dataloader_dict)
+    h_optimization = HyperOpt(model, data, dataloaders)
 
-    study = optuna.create_study(direction="maximize") # maximize for accuracy
-
+    study = optuna.create_study(direction="minimize") # minimize for loss
     study.optimize(h_optimization, n_trials=100, timeout=600)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
@@ -172,4 +169,4 @@ if __name__ == "__main__":
 
     print(" Saving best params...")
     hp_df = study.trials_dataframe()
-    hp_df.to_csv(PATH + str(MODEL))
+    hp_df.to_csv(args.save_dir + args.model_name + '.csv')
