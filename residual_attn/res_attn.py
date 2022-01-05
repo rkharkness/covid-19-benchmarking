@@ -15,22 +15,25 @@ from tensorflow.keras.layers import Multiply
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras import Model
 
+from tensorflow.keras.lossess import CategoricalCrossentropy
+from tensorflow.keras.optimizers import Adam
 
 
 class AttentionResNet56(Model):
-    def __init__(self, n_channels, optimizer, loss) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.shape = 480
-        self.n_channels = n_channels
-        self.loss = loss
-        self.optimizer = optimizer
+        self.n_channels = 4
+        self.loss = CategoricalCrossentropy()
+        self.optimizer = Adam()
         self.model_type = 'keras'
 
         self.conv1 = Conv2D(self.n_channels, (4, 4), strides=(2, 2), padding='same')
         self.batchnorm= BatchNormalization()
         self.activation = Activation('relu')
         self.maxpool = MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding='same') 
-        self.avgpool = AveragePooling2D(pool_size=self.get_pool_size(), strides=(1, 1))
+       # self.avgpool = AveragePooling2D(pool_size=self.get_pool_size(), strides=(1, 1))
+        self.avgpool = AveragePooling2D(pool_size=(3,3), strides=(1, 1))
         self.flatten = Flatten()
         self.dropout = Dropout(0.5)
         self.dense = Dense(2, activation='softmax')
@@ -144,7 +147,7 @@ class AttentionResNet56(Model):
         return output
 
 
-    def forward(self, input):
+    def call(self, input):
         '''
         Source: https://github.com/qubvel/residual_attention_network
         '''
@@ -178,7 +181,7 @@ class AttentionResNet56(Model):
 
         return output
 
-    def get_loss(self):
+    def get_loss_fn(self):
         return self.loss
     
     def get_optimizer(self):
@@ -192,5 +195,3 @@ class AttentionResNet56(Model):
         return Model(inputs=[x], outputs=self.forward(x))
 
 res_attn = AttentionResNet56()
-res_attn.loss = keras.losses.CategoricalCrossentropy()
-res_attn.optimizer = keras.optimizers.Adam()

@@ -24,7 +24,7 @@ transforms = A.Compose([
                 A.VerticalFlip(p=0.5),              
                 A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=15, p=0.5),
                 # A.Affine(translate_percent=10,p=0.5),
-                A.CLAHE(p=0.5),
+                #A.CLAHE(p=0.5),
                 A.HorizontalFlip(p=0.5),
                 A.RandomBrightnessContrast(p=0.5),    
                 A.RandomGamma(p=0.5),
@@ -81,7 +81,7 @@ class KerasDataGen(tf.keras.utils.Sequence):
         self.shuffle = shuffle
         self.transforms = transforms
         
-        self.n = len(self.df)
+        self.n = len(self.data)
 
     def __len__(self):
         return self.n // self.bs
@@ -101,19 +101,18 @@ class KerasDataGen(tf.keras.utils.Sequence):
         path_batch = batch[self.data['structured_path']]
         label_batch = batch[self.data['xray_status']]
 
-        x_batch = np.asarray([self.get_image(x for x in path_batch)])
-        y_batch = np.asarray([self.get_label(y for y in label_batch)])
+        x_batch = [self.get_image(x for x in path_batch)]
+        y_batch = [self.get_label(y,2) for y in label_batch]
 
         return x_batch, y_batch
 
     def __getitem__(self, index):
         batches = self.data[index*self.bs: (index + 1)*self.bs]
-        x, y = self.get_data(batches)
+        batch_x, batch_y = self.get_data(batches)
 
         if self.transform is not None:
-            x = self.transform(image=x)['image']
-
-        return x, y
+            batch_x = tf.cast([self.transforms(x) for x in batch_x], tf.float32)
+        return batch_x, batch_y
 
 
 def make_generators(model_type, train_df, val_df, test_df, params):
@@ -124,7 +123,7 @@ def make_generators(model_type, train_df, val_df, test_df, params):
         test_dg = KerasDataGen(test_df, params["batchsize"], transforms=val_aug_fn)
 
     elif model_type == "pytorch":
-        train_dataset = PytorchDataGen(train_df, transforms=transforms)
+        train_dataset = PytorchDataGen(train_df, transforms=train_aug_fn)
         train_dg = DataLoader(train_dataset, batch_size=params["batchsize"], 
         shuffle=True, num_workers = params["num_workers"])
         

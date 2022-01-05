@@ -7,7 +7,11 @@ import numpy as np
 import argparse
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score
-# checklist
+import itertools
+from residual_attn.res_attn import AttentionResNet56
+
+## checklist
+######################
 # - log training data
 # - plot losses
 # - cv
@@ -16,6 +20,87 @@ from sklearn.metrics import accuracy_score
 # - save best weights
 # - for tf, fastai and pytorch
 # - import dataloaders
+
+def train_mag_sd(model, model_name, dataloader, optimizer, loss_fn, patience, supervised=True, pretrained_weights=None):
+    from torch.utils.tensorboard import SummaryWriter
+    writer = SummaryWriter(model_name)
+
+    if (pretrained_weights):
+        model.load_state_dict(torch.load(pretrained_weights))
+
+    loss_dict = {'train': np.zeros(shape=(500,), dtype=np.float32),
+                'val': np.zeros(shape=(500,), dtype=np.float32)}
+    
+    acc_dict = {'train': np.zeros(shape=(500,), dtype=np.float32),
+                'val':np.zeros(shape=(500,), dtype=np.float32)}
+
+    no_improvement = 0
+    lr = optimizer.lr
+    end_epoch = 0
+
+    for epoch in range(500):
+        end_epoch =+1
+        loss_avg = {'train':[],'val':[]}
+        acc_avg = {'train':[],'val':[]}
+
+        for phase in ['train', 'val']:
+            if phase == 'train':
+                model.set_train()
+            else:
+                model.set_eval()
+
+            for batch in tqdm(len(dataloader[phase])):
+                if len(batch) > 1:
+                    batch_x, batch_y = batch
+                    batch_x.to(device)
+                    batch_y.to(device)
+                
+                else:
+                    batch_x = batch # assume image input
+                    batch_x.to(device)
+
+                optimizer.zero_grad()
+                with torch.set_grad_enabled(phase == 'train'):
+                    pred, _ = model.encoder(batch_x)
+                    acc, loss = model.compute_classification_loss(pred, batch_y)
+
+                    loss.backward()
+                    optimizer.step()
+                
+                loss_avg[phase].append(loss.item())
+                acc_avg[phase].append(acc[0])
+
+            loss_dict[phase][epoch] = np.mean(loss_avg[phase])
+            acc_dict[phase][epoch] = np.mean(acc_avg[phase])
+
+            writer.add_scalars('loss', {phase: loss_dict[phase][epoch]})
+            writer.add_scalars('accuracy', {phase: acc_dict[phase][epoch]})
+
+            print(f'-----------{phase}-----------')
+            print('Loss  =  {0:.3f}'.format(loss_dict[phase][epoch]))
+            print('Acc   =  {0:.3f}'.format(acc_dict[phase][epoch]))
+
+        if loss_avg['val'][epoch] > loss_avg['train'][epoch]:
+                no_improvement += 1
+                print(f"No improvement for {no_improvement}")
+
+                if no_improvement == 5:
+                    lr = lr*0.8
+                    optimizer.lr.assign(lr)
+                    print(f"Reducing lr to {lr}")
+
+                if no_improvement == patience:
+                    print(f"No improvement for {no_improvement}, early stopping at epoch {epoch}")
+                    break
+        else:
+            no_improvement = 0
+            print(f'saving model weights to {model_name}.h5')
+            model.save_model()
+
+    loss_dict = dict(itertools.islice(loss_dict.items(), end_epoch))
+    acc_dict = dict(itertools.islice(acc_dict.items(), end_epoch))
+    return loss_dict, acc_dict
+
 
 def train_pytorch(model, model_name, dataloader, optimizer, loss_fn, patience, supervised=True, pretrained_weights=None):    
     assert model.get_model_type() == 'pytorch'
@@ -35,7 +120,9 @@ def train_pytorch(model, model_name, dataloader, optimizer, loss_fn, patience, s
     no_improvement = 0
     lr = optimizer.lr
 
+    end_epoch = 0
     for epoch in range(500):
+        end_epoch =+1
         loss_avg = {'train':[],'val':[]}
         acc_avg = {'train':[],'val':[]}
 
@@ -97,6 +184,11 @@ def train_pytorch(model, model_name, dataloader, optimizer, loss_fn, patience, s
             no_improvement = 0
             print(f'saving model weights to {model_name}.pth')
             torch.save(model.state_dict(), model_name + '.pth')
+        
+    loss_dict = dict(itertools.islice(loss_dict.items(), end_epoch))
+    acc_dict = dict(itertools.islice(acc_dict.items(), end_epoch))
+    return loss_dict, acc_dict
+
 
 
 def train_keras(model, model_name, dataloader, optimizer, loss_fn, patience, supervised=True, pretrained_weights=None):
@@ -117,8 +209,10 @@ def train_keras(model, model_name, dataloader, optimizer, loss_fn, patience, sup
 
     no_improvement = 0
     lr = optimizer.lr
+    end_epoch = 0
 
     for epoch in range(500):
+        end_epoch =+1
         loss_avg = {'train':tf.keras.metrics.Mean(),
                     'val':tf.keras.metrics.Mean()}
 
@@ -182,7 +276,9 @@ def train_keras(model, model_name, dataloader, optimizer, loss_fn, patience, sup
             print(f'saving model weights to {model_name}.h5')
             model.save_weights(model_name + ".h5")
 
-        return loss_dict, acc_dict
+    loss_dict = dict(itertools.islice(loss_dict.items(), end_epoch))
+    acc_dict = dict(itertools.islice(acc_dict.items(), end_epoch))
+    return loss_dict, acc_dict
 
 
 def training(model, model_name, dataloader, patience):
@@ -201,9 +297,24 @@ def main(model, df):
         val_df = df[df[f'kfold_{fold}'] == "val"]
         test_df = df[df[f'kfold_{fold}'] == 'test']
         #make generators
+        
         train_loader, val_loader, test_loader = make_generators(train_df, val_df, test_df, params)
         # create dict of dataloaders
-        dataloaders = {'train':train_loader, 'val':val_loader, 'test':test_loader}
+        x, y = next(iter(train_loader))
+        fig = plt.figure(figsize=(4., 4.))
+        grid = ImageGrid(fig, 111,  # similar to subplot(111)
+                        nrows_ncols=(2, 2),  # creates 2x2 grid of axes
+                        axes_pad=0.1,  # pad between axes in inch.
+                        )
+
+        for ax, im in zip(grid, [x[0], x[1], x[2], x[3]]):
+            # Iterating over the grid returns the Axes.
+            ax.imshow(im)
+
+        plt.savefig('/content/batch_example.png')
+
+        dataloaders = {'train':train_loader, 'val':val_loader}
+        loss, acc = training(model, 'res_attn', dataloaders, 20)
 
 
 
@@ -220,5 +331,5 @@ if __name__ == "__main__":
         
     df = pd.read_csv(args.data_csv)
 
-    model = models.ResAttn()
+    model = AttentionResNet56()
     main(model, df)
