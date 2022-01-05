@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.optim as optim
 import os
 import copy
+import torchvision
+import torch.nn.functional as F
 
 EPSILON = 1e-12
 
@@ -72,7 +74,7 @@ class res50Encoder(nn.Module):
 
         # load backbone and optimize its architecture
         resnet = torchvision.models.resnet50(pretrained=True)
-        self.fc = nn.Linear(2048*config['attention_map_num'] config['class_num'], bias=False)
+        self.fc = nn.Linear(2048*config['attention_map_num'], config['class_num'], bias=False)
 
         # features
         resnet.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)

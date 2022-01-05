@@ -1,5 +1,4 @@
 from dataloaders import *
-import models
 import tensorflow as tf
 import torch
 import pandas as pd
@@ -20,6 +19,9 @@ from residual_attn.res_attn import AttentionResNet56
 # - save best weights
 # - for tf, fastai and pytorch
 # - import dataloaders
+
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 def train_mag_sd(model, model_name, dataloader, optimizer, loss_fn, patience, supervised=True, pretrained_weights=None):
     from torch.utils.tensorboard import SummaryWriter
@@ -322,14 +324,13 @@ def main(model, df):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Model Training Script')
-    parser.add_argument('--data_csv', default='/MULTIX/DATA/INPUT/binary_data.csv', type=str, help='Path to data file')
+    parser.add_argument('--data_csv', default='~/repos/covid-19-benchmarking/nccid_sample.csv', type=str, help='Path to data file')
     args = parser.parse_args()
 
-    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-    assert tf.test.is_gpu_available()
-    assert tf.test.is_built_with_cuda()
+   # print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+   # assert tf.test.is_gpu_available()
+   # assert tf.test.is_built_with_cuda()
         
     df = pd.read_csv(args.data_csv)
-
     model = AttentionResNet56()
     main(model, df)

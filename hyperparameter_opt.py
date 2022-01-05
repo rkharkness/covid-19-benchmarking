@@ -126,10 +126,10 @@ class HyperOpt(torch.nn.Module):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Hyperparameter tuning')
-    parser.add_argument('--data_path', default='/MULTIX/DATA/INPUT/binary_data.csv', type=str, help='Path to data file')
+    parser.add_argument('--data_path', default='~/repos/covid-19-benchmarking/nccid_sample.csv', type=str, help='Path to data file')
     parser.add_argument('--save_dir', type=str)
     parser.add_argument('--model_name', type=str)
-    args = parser.parse_args('--')
+    args = parser.parse_args()
 
     df = pd.read_csv(args.data_path)
     train_df = df[df[f'kfold_1'] == "train"]

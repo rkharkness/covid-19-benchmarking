@@ -15,9 +15,12 @@ from tensorflow.keras.layers import Multiply
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras import Model
 
-from tensorflow.keras.lossess import CategoricalCrossentropy
+from tensorflow.keras.losses import CategoricalCrossentropy
 from tensorflow.keras.optimizers import Adam
 
+#for local debugging without gpu
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 class AttentionResNet56(Model):
     def __init__(self) -> None:

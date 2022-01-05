@@ -105,10 +105,8 @@ def lime(img, label, model):
             temp, mask = explanation.get_image_and_mask(i, positive_only=True, 
                                                         num_features=5, hide_rest=True)
             ax[j,i+1].imshow(mark_boundaries(temp / 2 + 0.5, mask))
-            ax[j,i+1].set_title('p({}) = {:.4f}'.format(label, pred[incorrect_pred][indices[j]][i]))    
-
-
-
+            ax[j,i+1].set_title('p({}) = {:.4f}'.format(label, pred[incorrect_pred][indices[j]][i]))  
+            plt.savefig(f'/MULTIX/DATA/HOME/lime_{label}_{pred[incorrect_pred][indices[j]][i]}.png')  
 
 
 def guided_backprop(img, model):

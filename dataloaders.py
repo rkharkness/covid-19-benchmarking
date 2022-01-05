@@ -2,7 +2,7 @@ from pandas.core.algorithms import mode
 import tensorflow as tf
 import tensorflow.keras as keras
 import albumentations as A
-
+from albumentations.pytorch import ToTensorV2
 import pandas as pd
 import cv2
 import os
@@ -23,16 +23,17 @@ from torch.utils.data import Dataset, DataLoader
 transforms = A.Compose([
                 A.VerticalFlip(p=0.5),              
                 A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=15, p=0.5),
-                # A.Affine(translate_percent=10,p=0.5),
-                #A.CLAHE(p=0.5),
+                A.Affine(translate_percent=10,p=0.5),
+                A.CLAHE(p=0.5),
                 A.HorizontalFlip(p=0.5),
                 A.RandomBrightnessContrast(p=0.5),    
                 A.RandomGamma(p=0.5),
+                A.ColorJitter
                 
             # NORMALIZE?
             # SEGMENT WITH LAMBDA
              ])
-to_tensor = A.Compose([A.ToTensorV2()])
+to_tensor = A.Compose([ToTensorV2()])
 
 val_transforms = A.Compose([
                 # SEGMENT WITH LAMBDA
