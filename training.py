@@ -84,7 +84,7 @@ def train_mag_sd(model, model_name, dataloader, optimizer, loss_fn, patience, su
                 no_improvement += 1
                 print(f"No improvement for {no_improvement}")
 
-                if no_improvement == 5:
+                if no_improvement % 5 == 0:
                     lr = lr*0.8
                     optimizer.lr.assign(lr)
                     print(f"Reducing lr to {lr}")
@@ -172,7 +172,7 @@ def train_pytorch(model, model_name, dataloader, optimizer, loss_fn, patience, s
                 no_improvement += 1
                 print(f"No improvement for {no_improvement}")
 
-                if no_improvement == 5:
+                if no_improvement % 5 == 0:
                     lr = lr*0.8
                     optimizer.param_groups[0]['lr'] = lr
                     print(f"Reducing lr to {lr}")
@@ -263,7 +263,7 @@ def train_keras(model, model_name, dataloader, optimizer, loss_fn, patience, sup
                 no_improvement += 1
                 print(f"No improvement for {no_improvement}")
 
-                if no_improvement == 5:
+                if no_improvement % 5 == 0:
                     lr = lr*0.8
                     optimizer.lr.assign(lr)
                     print(f"Reducing lr to {lr}")
