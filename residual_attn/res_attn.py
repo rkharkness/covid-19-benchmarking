@@ -15,36 +15,67 @@ from tensorflow.keras.layers import Multiply
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras import Model
 
+from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.losses import CategoricalCrossentropy
 from tensorflow.keras.optimizers import Adam
 
+import tensorflow as tf
+
+from keras import backend as K
+import keras
+
+class WeightedBCE(keras.losses.Loss):
+  def __init__(self, trial=None):
+    """adapted from: https://stackoverflow.com/questions/46009619/keras-weighted-binary-crossentropy"""            
+    super().__init__()
+    self.trial = trial
+    self.weights = {'0':1.32571275, '1':0.80276873}
+
+  def call(self, y_true, y_pred):
+        # Original binary crossentropy (see losses.py):
+        # K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.cast(y_pred, tf.float32)
+
+        # Calculate the binary crossentropy
+        b_ce = K.binary_crossentropy(y_true, y_pred)
+
+        # Apply the weights
+        weight_vector = y_true * self.weights['1'] + (1. - y_true) * self.weights['0']
+        weighted_b_ce = weight_vector * b_ce
+
+        # Return the mean error
+        return K.mean(weighted_b_ce)
+
 #for local debugging without gpu
-import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-
 class AttentionResNet56(Model):
-    def __init__(self) -> None:
-        super().__init__()
-        self.shape = 480
-        self.n_channels = 4
-        self.loss = CategoricalCrossentropy()
-        self.optimizer = Adam()
-        self.model_type = 'keras'
+    optimizer = Adam()
+    loss_fn = WeightedBCE()
+    model_type = 'keras'
+    model_name = 'res_attn'
 
-        self.conv1 = Conv2D(self.n_channels, (4, 4), strides=(2, 2), padding='same')
+    def __init__(self, trial=None) -> None:
+        super().__init__()
+        self.shape = (480,480,3)
+        self.n_channels = 64
+
+        self.conv1 = Conv2D(self.n_channels, (8,8), strides=(2, 2), activation='relu') #, padding='same')
         self.batchnorm= BatchNormalization()
         self.activation = Activation('relu')
-        self.maxpool = MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding='same') 
-       # self.avgpool = AveragePooling2D(pool_size=self.get_pool_size(), strides=(1, 1))
-        self.avgpool = AveragePooling2D(pool_size=(3,3), strides=(1, 1))
+        self.maxpool = MaxPool2D(pool_size=(4, 4), strides=(2, 2), padding='same')
+        
+        self.conv2 = Conv2D(self.n_channels, (8,8), strides=(2, 2), activation='relu') # added conv layer
+
+        self.avgpool = AveragePooling2D(pool_size=(7,7), strides=(1, 1))
         self.flatten = Flatten()
         self.dropout = Dropout(0.5)
-        self.dense = Dense(2, activation='softmax')
+        self.dense1 = Dense(1024, activation='relu') # added dense layer
+        self.dense2 = Dense(1, activation='sigmoid')
 
     def get_pool_size(self, x):
         return (x.get_shape()[1], x.get_shape()[2])
 
-    def residual_block(input, input_channels=None, output_channels=None, kernel_size=(3, 3), stride=1):
+    def residual_block(self, input, input_channels=None, output_channels=None, kernel_size=(3, 3), stride=1):
         '''
         Source: https://github.com/qubvel/residual_attention_network
         '''
@@ -61,7 +92,7 @@ class AttentionResNet56(Model):
 
         x = Activation('relu')(x)
         x = BatchNormalization()(x)
-        x = Conv2D(input_channels, kernel_size, padding='same',  strides=stride)(x)
+        x = Conv2D(input_channels, kernel_size, padding='same', strides=stride)(x)
 
         x = Activation('relu')(x)
         x = BatchNormalization()(x)
@@ -158,9 +189,8 @@ class AttentionResNet56(Model):
         x = self.batchnorm(x)
         x = self.activation(x)
         x = self.maxpool(x)
-        
-        # x = self.residual_block(x, output_channels=n_channels * 4)  # 56x56
-        # x = self.attention_block(x, encoder_depth=4)  # bottleneck 7x7
+
+        x = self.conv2(x)
 
         x = self.residual_block(x, output_channels=self.n_channels * 4)  # 56x56
         x = self.attention_block(x, encoder_depth=3)  # bottleneck 7x7
@@ -175,26 +205,15 @@ class AttentionResNet56(Model):
         x = self.residual_block(x, output_channels=self.n_channels * 32)
         x = self.residual_block(x, output_channels=self.n_channels * 32)
 
-       # pool_size = (x.get_shape()[1], x.get_shape()[2])
         x = self.avgpool(x)
         x = self.flatten(x)
 
+        x = self.dense1(x)
         x = self.dropout(x)
-        output = self.dense(x)
+        output = self.dense2(x)
 
         return output
-
-    def get_loss_fn(self):
-        return self.loss
-    
-    def get_optimizer(self):
-        return self.optimizer
-    
-    def get_model_type(self):
-        return self.model_type
-    
+   
     def build_graph(self, input_shape):
         x = Input(shape=(None, input_shape), ragged=True)
-        return Model(inputs=[x], outputs=self.forward(x))
-
-res_attn = AttentionResNet56()
+        return Model(inputs=[x], outputs=self.call(x))
