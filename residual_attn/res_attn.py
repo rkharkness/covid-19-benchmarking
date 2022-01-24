@@ -191,7 +191,7 @@ class AttentionResNetModified(Model):
       x = residual_block(x, input_channels=512, output_channels=512)
       x = AveragePooling2D(pool_size=(14,14), strides=(1, 1))(x)  # 1x1
       x = Flatten()(x)
-      x = Dropout()(x)
+      x = Dropout(dropout)(x)
 
       output = Dense(n_classes, activation='sigmoid')(x)
 
