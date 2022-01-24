@@ -26,8 +26,7 @@ import matplotlib.pyplot as plt
 model = ECovNet()
 
 def objective(trial, model=model, supervised=True):
-    trial_lr = trial.suggest_categorical("lr", [1e-5, 5e-4, 1e-4, 5e-3, 1e-3])
-   # trial_lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
+    trial_lr = trial.suggest_categorical("lr", [1e-7, 5e-7, 1e-6, 5e-5, 1e-5, 5e-4, 1e-4, 5e-3, 1e-3, 5e-2, 1e-2])
     optimizer = model.optimizer
 
     optimizer.learning_rate = trial_lr
@@ -45,7 +44,7 @@ def objective(trial, model=model, supervised=True):
     if model.model_type == 'keras':
       loss_dict = {'train': [],'val': []}
 
-      for epoch in range(10):
+      for epoch in range(15):
           print(f'epoch - {epoch}')
           loss_avg = {'train':[],'val':[]}
           for phase in ['train', 'val']:
@@ -83,8 +82,14 @@ def objective(trial, model=model, supervised=True):
               print(f'best val loss: {best_val_loss}')
              
       metric_df = pd.DataFrame.from_dict(loss_dict)
-      metric_df.to_csv(f'/MULTIX/DATA/nccid/{model.model_name}_optuna_metrics_lr_{trial_lr}.csv')
-      
+
+      if supervised == True:
+          save_path = f'/MULTIX/DATA/nccid/{model.model_name}_supervised_optuna_metrics_lr_{trial_lr}.csv'
+      else:
+          save_path = f'/MULTIX/DATA/nccid/{model.model_name}_unsupervised_optuna_metrics_lr_{trial_lr}.csv'
+
+      metric_df.to_csv(save_path)
+
       return best_val_loss
 
 if __name__ == "__main__":
