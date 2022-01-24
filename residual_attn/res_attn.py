@@ -23,6 +23,30 @@ from keras import backend as K
 import keras
 from tensorflow.keras.regularizers import l2
 
+class WeightedBCE(keras.losses.Loss):
+  def __init__(self, trial=None):
+    """adapted from: https://stackoverflow.com/questions/46009619/keras-weighted-binary-crossentropy"""            
+    super().__init__()
+    self.trial = trial
+    self.weights = {'0':1.32571275, '1':0.80276873}
+   # self.weights = {'0':1.0, '1':1.0}
+
+  def call(self, y_true, y_pred):
+        # Original binary crossentropy (see losses.py):
+        # K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.cast(y_pred, tf.float32)
+
+        # Calculate the binary crossentropy
+        b_ce = K.binary_crossentropy(y_true, y_pred)
+
+        # Apply the weights
+        weight_vector = y_true * self.weights['1'] + (1. - y_true) * self.weights['0']
+        weighted_b_ce = weight_vector * b_ce
+
+        # Return the mean error
+        return K.mean(weighted_b_ce)
+
 def residual_block(input, input_channels=None, output_channels=None, kernel_size=(3, 3), stride=1):
     if output_channels is None:
         output_channels = input.get_shape()[-1]
@@ -126,9 +150,15 @@ class AttentionResNetModified(Model):
     loss_fn = WeightedBCE()
     model_name = 'res_attn'
     model_type = 'keras'
-    def __init__(self, shape=(480,480,3), n_channels=64, n_classes=1,
-                      dropout=0.5, regularization=0.01):
+    def __init__(self, trial=None):
       super(AttentionResNetModified, self).__init__()
+
+      shape=(480,480,3)
+      n_channels=64 
+      n_classes=1
+      dropout=0.5
+      regularization=0.01
+
       input_ = Input(shape=shape)
 
       x = Conv2D(n_channels/2, (7,7), strides=(2,2))(input_)
@@ -161,9 +191,7 @@ class AttentionResNetModified(Model):
       x = residual_block(x, input_channels=512, output_channels=512)
       x = AveragePooling2D(pool_size=(14,14), strides=(1, 1))(x)  # 1x1
       x = Flatten()(x)
-
-      if dropout:
-          x = Dropout()(x)
+      x = Dropout()(x)
 
       output = Dense(n_classes, activation='sigmoid')(x)
 
