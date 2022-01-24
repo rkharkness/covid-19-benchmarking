@@ -162,13 +162,21 @@ def train_pytorch(model, dataloader, k, patience=20, pretrained_weights=None):
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == 'train'):
                     pred = model(batch_x)
-                    if len(pred) > 1:
+                    if len(pred) == 2:
                         pred, pred_img = pred[0], pred[1] # image, class
-                    
+                    if len(pred) == 3:
+                        pred, pred_img, z = pred[0], pred[1],pred[3]
+                        
                     if supervised == False:
                         loss_fn = model.loss_fn['ae']
                         loss = loss_fn(pred_img, batch_x) # if unsupervised (no label) - loss_fn input = image
-
+                        
+                        if model.model_name == 'coronet':
+                            assert len(pred) > 2
+                            assert all(batch_y.detach.cpu().numpy()==0.0)
+                            pred_z = model(pred)
+                            loss_z = loss_fn(pred_z, z)
+                            loss = loss  + loss_z
                     else:
                         loss_fn = model.loss_fn['classifier']
                         loss = loss_fn(pred, batch_y.long()) # if unsupervised (no label) - loss_fn input = class pred
@@ -314,13 +322,13 @@ def train_keras(model, dataloader, k, patience=20, supervised=True, pretrained_w
         plt.legend(['Training Loss', 'Val Loss', 'Training Acc', 'Val Acc'])
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.savefig(f'/MULTIX/DATA/nccid/{model.model_name}_metrics_epoch_{k}.png')
+        plt.savefig(f'/MULTIX/DATA/nccid/{model.model_name}_metrics_k{k}.png')
         
         loss_df = pd.DataFrame.from_dict(loss_dict)
-        loss_df.to_csv(f'/MULTIX/DATA/nccid/{model.model_name}_loss_epoch_{k}.csv')
+        loss_df.to_csv(f'/MULTIX/DATA/nccid/{model.model_name}_loss_k{k}.csv')
 
         acc_df = pd.DataFrame.from_dict(acc_dict)
-        acc_df.to_csv(f'/MULTIX/DATA/nccid/{model.model_name}_acc_epoch_{k}.csv')
+        acc_df.to_csv(f'/MULTIX/DATA/nccid/{model.model_name}_acc_k{k}.csv')
 
 
         if loss_dict['val'][epoch] > best_val_loss:
@@ -356,8 +364,7 @@ def training(model, dataloader, k, patience=20):
     return loss, acc
     
 
-def main(model, df):
-    for fold in range(1,6):
+def main(model, fold, df):
         train_df = df[df[f'kfold_{fold}'] == "train"]
         val_df = df[df[f'kfold_{fold}'] == "val"]
         test_df = df[df[f'kfold_{fold}'] == 'test']
@@ -413,5 +420,6 @@ if __name__ == "__main__":
     
     df['xray_status'] = df['xray_status'].map(mapping)
 
-    model = ECovNet()
-    main(model, df)
+    for fold in range(1,6):
+        model = ECovNet()
+        main(model, fold, df)
