@@ -89,7 +89,7 @@ def attention_block(input, input_channels=None, output_channels=None, encoder_de
         ## skip connections
         output_skip_connection = residual_block(output_soft_mask)
         skip_connections.append(output_skip_connection)
-        # print ('skip shape:', output_skip_connection.get_shape())
+       # print ('skip shape:', output_skip_connection.get_shape())
 
         ## down sampling
         output_soft_mask = MaxPool2D(padding='same')(output_soft_mask)
@@ -132,14 +132,14 @@ class WeightedBCE(keras.losses.Loss):
     """adapted from: https://stackoverflow.com/questions/46009619/keras-weighted-binary-crossentropy"""            
     super().__init__()
     self.trial = trial
-    self.weights = {'0':1.28105274, '1':0.82008082}
+    self.weights = {'0':1.32571275, '1':0.80276873}
    # self.weights = {'0':1.0, '1':1.0}
 
   def call(self, y_true, y_pred):
         # Original binary crossentropy (see losses.py):
         # K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
         y_true = tf.cast(y_true, tf.float32)
-        y_pred = tf.cast(y_pred, tf.float32)
+        y_pred = tf.cast((y_pred+1e-10), tf.float32)
 
         # Calculate the binary crossentropy
         b_ce = K.binary_crossentropy(y_true, y_pred)
@@ -168,6 +168,7 @@ class AttentionResNetModified(Model):
 
       self.optimizer = Adam()
       self.loss_fn = WeightedBCE()
+      self.lr = 1e-5
       self.model_name = 'res_attn'
       self.model_type = 'keras'
 
@@ -216,7 +217,7 @@ class AttentionResNetModified(Model):
 
       model = Model(input_, output)
 
-      model = {'model':model, 'optimizer':self.optimizer, 'loss_fn':self.loss_fn,
+      model = {'model':model, 'optimizer':self.optimizer, 'loss_fn':self.loss_fn, 'lr':self.lr,
             'model_name':self.model_name, 'model_type':self.model_type,'supervised':self.supervised}
       return model
 
