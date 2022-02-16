@@ -54,7 +54,7 @@ class WeightedBCE(keras.losses.Loss):
         # Original binary crossentropy (see losses.py):
         # K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
         y_true = tf.cast(y_true, tf.float32)
-        y_pred = tf.cast(y_pred, tf.float32)
+        y_pred = tf.cast((y_pred+1e-10), tf.float32)
 
         # Calculate the binary crossentropy
         b_ce = K.binary_crossentropy(y_true, y_pred)
@@ -80,13 +80,17 @@ class ECovNet(Model):
         self.model_name = 'ecovnet'
         self.supervised = True
         self.dropout_act = dropout_act
-
+        self.lr = 1e-4
         self.model = self.build_model()
     
     def build_model(self):
         base_model = enet.EfficientNetB1(include_top=False, input_shape=(480,480,3), pooling='avg', weights="imagenet",classes=1)
-
+        
+        base_model = Model(base_model.input, base_model.layers[-5].output)
+        
         x = base_model.output
+
+        x = GlobalAveragePooling2D()(x)
         x = BatchNormalization()(x)
 
         x = Dense(32,kernel_regularizer=l1_l2(l1=1e-5, l2=1e-3))(x)
@@ -102,7 +106,7 @@ class ECovNet(Model):
         predictions = Dense(1, activation="sigmoid")(x)
         model = Model(inputs = base_model.input, outputs = predictions)
 
-        model = {'model':model, 'optimizer':self.optimizer, 'loss_fn':self.loss_fn,
+        model = {'model':model, 'optimizer':self.optimizer, 'loss_fn':self.loss_fn, 'lr':self.lr,
         'model_name':self.model_name, 'model_type':self.model_type, 'supervised':self.supervised}
 
         return model
