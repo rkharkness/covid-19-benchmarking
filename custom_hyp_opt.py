@@ -136,34 +136,30 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
                     optimizer.zero_grad()
                     with torch.set_grad_enabled(phase == 'train'):
                         pred = classifier(batch_x)
-                        #print(pred)
-                        #print(len(pred))
+
                         if len(pred) == 2:
                             pred, pred_img = pred[0], pred[1] # image, class
-                         #   print(pred[0].shape)
-                          #  print(pred_img)
-                          #  print(pred_img[0].shape)
+
                         if len(pred) == 3:
                             pred, pred_img, z = pred[0], pred[1],pred[3]
                             
                         if supervised == False:
                             loss = loss_fn(pred_img, batch_x) # if unsupervised (no label) - loss_fn input = image
                             
-                            # if model['model_name'] == 'coronet':
-                            #     assert len(pred) > 2
-                            #     assert all(batch_y.detach.cpu().numpy()==0.0)
-                            #     pred_z = model(pred)
-                            #     loss_z = loss_fn(pred_z, z)
-                            #     loss = loss  + loss_z
+                            if model['model_name'] == 'coronet':
+                                assert len(pred[0]) > 2
+                                assert all(batch_y.detach.cpu().numpy()==0.0) # double check only training encoder with 
+                                pred_z = classifier(pred)
+                                loss_z = loss_fn(pred_z, z)
+                                loss = loss  + loss_z
+                                
                         else:
                             loss = loss_fn(batch_y.long(),pred) # if unsupervised (no label) - loss_fn input = class pred
-                            #print(pred, batch_y.long())
+
                         if phase == 'train':
-                          #  print(loss.item())
                             loss.backward()
                             optimizer.step()
-                           # if loss.item() == np.nan:
-                            #    break
+
                         
                     loss_avg[phase].append(loss.item())
                 
