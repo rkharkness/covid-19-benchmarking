@@ -115,140 +115,6 @@ def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-#def train_pytorch(model, dataloader, k, patience=20, pretrained_weights=None):    
- #   assert model.model_type == 'pytorch'
-  #  writer = SummaryWriter(model.model_name)
-    
-   # device = 'cuda'
-   # model = model.to(device)
-
-  #  supervised = model.supervised
-  #  print('supervised: ', supervised)
-
-   # if model.optimizer == 'adam':
-    #  optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-
-  #  if (pretrained_weights):
-   #     classifier.load_state_dict(torch.load(pretrained_weights)) # load ae weights for coronet
-
-   # loss_dict = {'train': np.zeros(shape=(500,), dtype=np.float32),
-    #            'val': np.zeros(shape=(500,), dtype=np.float32)}
-    
-  #  acc_dict = {'train': np.zeros(shape=(500,), dtype=np.float32),
-   #             'val':np.zeros(shape=(500,), dtype=np.float32)}
-
-#    no_improvement = 0
-  #  lr = get_lr(optimizer)
-
- #   best_val_loss = np.inf
-
- #   end_epoch = 0
-  #  for epoch in range(500):
-   #     end_epoch =+1
-    #    loss_avg = {'train':[],'val':[]}
-    #    acc_avg = {'train':[],'val':[]}
-
-    #    for phase in ['train', 'val']:
-     #       if phase == 'train':
-      #          model.train()
-       #     else:
-        #        model.eval()
-
-        #    for batch in tqdm(dataloader[phase]):
-         #       batch_x, batch_y = batch
-           #     batch_x = batch_x.to(device)
-          #      batch_y = batch_y.to(device)
-
-           #     optimizer.zero_grad()
-          #      with torch.set_grad_enabled(phase == 'train'):
-             #       pred = model(batch_x)
-            #        if len(pred) == 2:
-              #          pred, pred_img = pred[0], pred[1] # image, class
-            #        if len(pred) == 3:
-             #           pred, pred_img, z = pred[0], pred[1],pred[3]
-                        
-           #         if supervised == False:
-            #            loss_fn = model.loss_fn['ae']
-             #           loss = loss_fn(pred_img, batch_x) # if unsupervised (no label) - loss_fn input = image
-                        
-              #          if model.model_name == 'coronet':
-               #             assert len(pred) > 2
-               #             assert all(batch_y.detach.cpu().numpy()==0.0)
-                #            pred_z = model(pred)
-                 #           loss_z = loss_fn(pred_z, z)
-                  #          loss = loss  + loss_z
-                 #   else:
-                  #      if type(model.loss_fn) == dict():
-        #                    loss_fn = model.loss_fn['classifier']
-         #               else:
-          #                  loss_fn = model.loss_fn
-                            
-           #             loss = loss_fn(pred, batch_y.long()) # if unsupervised (no label) - loss_fn input = class pred
-                        
-           #             pred_binary = [1 * (x[0].cpu().numpy() >=0.5) for x in pred]
-          #              acc = accuracy_score(batch_y.detach().cpu().numpy(), pred_binary)
-           #             acc_avg[phase].append(acc)
-
-            #        if phase == 'train':
-             #           loss.backward()
-              #          optimizer.step()
-                    
-            #    loss_avg[phase].append(loss.item())
-
-       #     loss_dict[phase][epoch] = np.mean(loss_avg[phase])
-
-        #    if len(acc_avg[phase]) > 0:
-         #     acc_dict[phase][epoch] = np.mean(acc_avg[phase])
-
-          #  writer.add_scalars('loss', {phase: loss_dict[phase][epoch]}, epoch)
-          #  writer.add_scalars('accuracy', {phase: acc_dict[phase][epoch]}, epoch)
-
-          #  print(f'-----------{phase}-----------')
-         #   print('Loss  =  {0:.3f}'.format(loss_dict[phase][epoch]))
-        #    print('Acc   =  {0:.3f}'.format(acc_dict[phase][epoch]))
-            
-       # plt.plot(len(loss_dict['train'][:epoch]), loss_dict['train'][:epoch], 'r')
-      #  plt.plot(len(loss_dict['val'][:epoch]), loss_dict['val'][:epoch], 'b')
-        
-       # plt.plot(len(acc_dict['train'][:epoch]), acc_dict['train'][:epoch], 'y')
-      #  plt.plot(len(acc_dict['val'][:epoch]), acc_dict['val'][:epoch], 'g')
-               
-     #   plt.legend(['Training Loss', 'Val Loss', 'Training Acc', 'Val Acc'])
-     #   plt.xlabel('Epoch')
-      #  plt.ylabel('Loss')
-      #  if supervised==True:
-       #     save_path = f'/MULTIX/DATA/nccid/{model.model_name}_ae_metrics_epoch_k{k}'
-    #    else:
-     #       save_path = f'/MULTIX/DATA/nccid/{model.model_name}_classifier_metrics_epoch_k{k}'
-
-     #   plt.savefig(save_path + '.png')
-        
-      #  metric_df = pd.DataFrame.from_dict(loss_dict, orient="index")
-      #  metric_df.to_csv(save_path + '.csv')
-
-
-       # if loss_dict['val'][epoch] > best_val_loss:
-     #           no_improvement += 1
-      #          print(f"No improvement for {no_improvement}")
-
-       #         if no_improvement % 5 == 0:
-       #             lr = lr*0.8
-       #             optimizer.param_groups[0]['lr'] = lr
-      #              print(f"Reducing lr to {lr}")
-
-     #           if no_improvement == patience:
-     #               print(f"No improvement for {no_improvement}, early stopping at epoch {epoch}")
-     #               break
-   #     else:
-    #        no_improvement = 0
-   #         print(f'saving model weights to {model.model_name}_{k}.pth')
-  #          torch.save(model.state_dict(), model.model_name + '_' + str(k) +'.pth')
- #           best_val_loss = loss_dict['val'][epoch]
-        
-#    loss_dict = dict(itertools.islice(loss_dict.items(), end_epoch))
-#    acc_dict = dict(itertools.islice(acc_dict.items(), end_epoch))
-#    return loss_dict, acc_dict
-
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
@@ -305,21 +171,23 @@ def train_pytorch(model, dataloader, k, patience=20, pretrained_weights=None):
 
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == 'train'):
+
                     pred = classifier(batch_x)
-                    if len(pred) == 2:
+                    if len(pred[0]) == 2:
                         pred, pred_img = pred[0], pred[1] # image, class
-                    if len(pred) == 3:
+                    if len(pred[0]) == 3: # for unsup coronet
                         pred, pred_img, z = pred[0], pred[1],pred[3]
                         
                     if supervised == False:
                         loss = loss_fn(pred_img, batch_x) # if unsupervised (no label) - loss_fn input = image
-                        
-                        # if model['model_name'] == 'coronet':
-                        #     assert len(pred) > 2
-                        #     assert all(batch_y.detach.cpu().numpy()==0.0)
-                        #     pred_z = model(pred)
-                        #     loss_z = loss_fn(pred_z, z)
-                        #     loss = loss  + loss_z
+    
+                        if model['model_name'] == 'coronet':
+                            assert len(pred[0]) > 2
+                            assert all(batch_y.detach.cpu().numpy()==0.0) # double check only training encoder with 
+                            pred_z = classifier(pred)
+                            loss_z = loss_fn(pred_z, z)
+                            loss = loss  + loss_z
+
                     else:
                         loss = loss_fn(batch_y.long(),pred) # if unsupervised (no label) - loss_fn input = class pred
                         
