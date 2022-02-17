@@ -196,8 +196,10 @@ class CoroNet(nn.Module):
 
         if self.supervised:
             self.loss_fn = WeightedBCE()
+            self.lr = 1e-4
         else:
             self.loss_fn = nn.MSELoss()
+            self.lr = 1e-5
 
         self.fpae = FPAE()
         self.classifier = Classifier()
@@ -223,7 +225,7 @@ class CoroNet(nn.Module):
 
 if __name__ == "__main__":
     coronet = CoroNet.build_model()
-    print(summary(coronet))
+    print(summary(coronet['model']))
 
     
 
