@@ -31,21 +31,18 @@ def train_aug_fn(image, mean, sd):
                 A.RandomBrightnessContrast(p=0.5),    
                 A.ColorJitter(),
                 A.Normalize(mean=mean, std=sd),
-               # ToTensorV2()
              ])
     data = {"image":image}
     aug_data = transforms(**data)
     aug_img = aug_data["image"]
-   # aug_img = to_tensor(aug_img) 
     aug_img= tf.cast(aug_img, tf.float32)   
     return aug_img
 
 def val_aug_fn(image, mean, sd):
     val_transforms = A.Compose([
-     # A.HorizontalFlip(p=0.5)
       A.Normalize(mean=mean, std=sd),
-    #  ToTensorV2()     
     ])
+
     data = {"image":image}
     aug_data = val_transforms(**data)
     aug_img = aug_data["image"]
@@ -53,76 +50,14 @@ def val_aug_fn(image, mean, sd):
     aug_img= tf.cast(aug_img, tf.float32)
     return aug_img
 
-class ImbalancedSiameseNetworkDataset(Dataset):
-    
-    def __init__(self,trainImageFolderDataset,train, testImageFolderDataset=None, transform=None):
-        # self.train = train
-        self.trainImageFolderDataset = trainImageFolderDataset    
-        self.transform = transform
-        self.comparison_ds = trainImageFolderDataset
-
-        if train == True:
-          self.comparison_ds = trainImageFolderDataset
-        else:
-          self.comparison_ds = testImageFolderDataset
-        
-    def __getitem__(self,index):
-
-        should_get_pneum = random.randint(0,1)
-
-        if should_get_pneum:
-          while True:
-            img0_idx = np.random.choice(self.trainImageFolderDataset.index)
-            img0_tuple = (self.trainImageFolderDataset.filename[img0_idx], self.trainImageFolderDataset.pneumonia_binary[img0_idx])
-            if img0_tuple[1] == 1:
-              break
-        else:
-          while True:
-            img0_idx = np.random.choice(self.trainImageFolderDataset.index)
-            img0_tuple = (self.trainImageFolderDataset.filename[img0_idx], self.trainImageFolderDataset.pneumonia_binary[img0_idx])
-            if img0_tuple[1] == 0:
-              break          
-
-        #we need to make sure approx 50% of images are in the same class
-        should_get_same_class = random.randint(0,1)
-        
-        if should_get_same_class:
-            while True:
-                #keep looping till the same class image is found
-                img1_idx = np.random.choice(self.comparison_ds.index) 
-                img1_tuple = (self.comparison_ds.filename[img1_idx], self.comparison_ds.pneumonia_binary[img1_idx])
-                
-                if img0_tuple[1]==img1_tuple[1]:
-                    break
-        else:
-            while True:
-              img1_idx = np.random.choice(self.comparison_ds.index) 
-              img1_tuple = (self.comparison_ds.filename[img1_idx], self.comparison_ds.pneumonia_binary[img1_idx])
-              
-              if img0_tuple[1]!=img1_tuple[1]:
-                  break
-
-        img0 = cv2.imread(img0_tuple[0])
-        img1 = cv2.imread(img1_tuple[0])
-
-        
-        if self.transform is not None:
-            img0 = self.transform(image=img0)["image"]
-            img1 = self.transform(image=img1)["image"]
-            
-        return img0/255.0, img1/255.0 , torch.from_numpy(np.array([int(img1_tuple[1]!=img0_tuple[1])],dtype=np.float32)), img0_tuple[1], img1_tuple[1]
-
-
-    def __len__(self):
-        return len(self.trainImageFolderDataset)
-
 class PytorchDataGen(Dataset):
     def __init__(self, data, train, k, label=None):
         self.train = train
 
         self.label = label
 
-        if self.label:
+        if self.label != None:
+            print('filtering down to one class ...')
             self.data = data[data['xray_status']==label]
         else:
             self.data = data
@@ -160,7 +95,7 @@ class PytorchDataGen(Dataset):
         return image, torch.tensor(label, dtype=torch.float)
     
 class KerasDataGen(tf.keras.utils.Sequence):
-    def __init__(self, data, batch_size, transforms, k, shuffle=True):
+    def __init__(self, data, batch_size, transforms, k, shuffle=True, chexpert=False):
     
         self.data = data.copy()
         self.bs = batch_size
@@ -174,6 +109,8 @@ class KerasDataGen(tf.keras.utils.Sequence):
                    (0.2224, 0.2224, 0.2224),(0.2225, 0.2225, 0.2225), (0.2226, 0.2226, 0.2226)]
         self.n = len(self.data)
 
+        self.chexpert = chexpert
+
     def __len__(self):
         return self.n // self.bs
 
@@ -183,6 +120,8 @@ class KerasDataGen(tf.keras.utils.Sequence):
 
     def get_image(self, path):
         image = cv2.imread(path)
+        if self.chexpert == True:
+            image = cv2.resize(image, (480, 480), interpolation = cv2.INTER_AREA)
         return image
 
     def get_label(self, label, num_classes):
@@ -193,9 +132,11 @@ class KerasDataGen(tf.keras.utils.Sequence):
         y_batch = batch['xray_status'].values
 
         x_batch = [self.get_image(x) for x in path_batch]
-        #y_batch = [self.get_label(y,2) for y in label_batch]
 
-        return x_batch, y_batch
+        if self.chexpert == True:
+            y_batch = [self.get_label(y,5) for y in y_batch]
+
+        return x_batch, y_batch        
 
     def __getitem__(self, index):
         mean = self.mean[self.k-1]
@@ -208,18 +149,43 @@ class KerasDataGen(tf.keras.utils.Sequence):
             batch_x = tf.cast([self.transforms(x, mean, sd) for x in batch_x], tf.float32)
         return batch_x, tf.expand_dims(batch_y, axis=-1)
 
+class SiameseDataGen(tf.keras.utils.Sequence):
+    def __init__(self, data, batch_size, transforms, k, shuffle=True):
+    
+        self.generator1 = KerasDataGen(data, 1, transforms, k)
+        self.generator2 = KerasDataGen(data, 1, transforms, k)
 
-def make_generators(model, train_df, val_df, test_df, params):
+    def __len__(self):
+       return len(self.generator1)
+
+    def __getitem__(self, index):
+       x1,y1 = self.generator1[index]
+       x2,y2 = self.generator2[index]
+
+       if y1 == y2:
+           label = [1.0]
+       else:
+           label = [0.0]
+
+       return (x1,x2), tf.cast(label, float)
+
+
+def make_generators(model, train_df, val_df, test_df, params, chexpert=False):
     assert model['model_type'] in ['keras', 'pytorch', 'fastai']
     
-    
     if model['model_type'] == "keras":
-        train_dg = KerasDataGen(train_df, params["batchsize"], transforms=train_aug_fn, k=params["k"])   
-        val_dg = KerasDataGen(val_df, params["batchsize"], transforms=val_aug_fn, k=params["k"])
-        test_dg = KerasDataGen(test_df, params["batchsize"], transforms=val_aug_fn, k=params["k"])
+        if model["model_name"] == "siamese_net" and model['pretrained']:
+            Generator = SiameseDataGen
+        else:
+            Generator = KerasDataGen
+
+        train_dg = Generator(train_df, params["batchsize"], transforms=train_aug_fn, k=params["k"])   
+        val_dg = Generator(val_df, params["batchsize"], transforms=val_aug_fn, k=params["k"])
+        test_dg = Generator(test_df, params["batchsize"], transforms=val_aug_fn, k=params["k"])
 
     elif model['model_type'] == "pytorch":
-        if model['model_name']=='coronet':
+        if model['model_name']=='coronet' and model['supervised']==False:
+            print('filtering labels for coronet ...')
             label = 0
         else:
             label = None
