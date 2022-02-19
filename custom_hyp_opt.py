@@ -3,6 +3,8 @@
 #from models.ac_covidnet import ACCovidNet
 #from models.res_attn import AttentionResNetModified
 from models.coronanet import CoronaNet
+from models.coronet import CoroNet
+from models.siamese_net import SiameseNetwork
 import matplotlib.pyplot as plt
 from torchinfo import summary
 
@@ -32,7 +34,8 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
     # make generators
     fold = 1
     params = {'batchsize':24, "num_workers":8, "k":fold}
-    train_loader, val_loader, _ = make_generators(model['model_type'],train_df, val_df, test_df, params)
+
+    train_loader, val_loader, _ = make_generators(model, train_df, val_df, test_df, params)
     # create dict of dataloaders
     dataloader = {'train':train_loader, 'val':val_loader}
 
@@ -117,7 +120,6 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
 
         loss_fn = model['loss_fn']
 
-
         for epoch in range(10):
             print(f'epoch - {epoch}')
             
@@ -141,16 +143,16 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
                             pred, pred_img = pred[0], pred[1] # image, class
 
                         if len(pred) == 3:
-                            pred, pred_img, z = pred[0], pred[1],pred[3]
+                            pred, pred_img, z = pred[0], pred[1],pred[2]
                             
                         if supervised == False:
                             loss = loss_fn(pred_img, batch_x) # if unsupervised (no label) - loss_fn input = image
                             
                             if model['model_name'] == 'coronet':
                                 assert len(pred[0]) > 2
-                                assert all(batch_y.detach.cpu().numpy()==0.0) # double check only training encoder with 
+                                assert all(batch_y.detach().cpu().numpy()==0.0) # double check only training encoder with 
                                 pred_z = classifier(pred)
-                                loss_z = loss_fn(pred_z, z)
+                                loss_z = loss_fn(pred_z[2], z)
                                 loss = loss  + loss_z
                                 
                         else:
@@ -227,10 +229,10 @@ if __name__ == "__main__":
     val_df = df[df['kfold_1'] == "val"]
     test_df = df[df['kfold_1'] == 'test']
 
-    coronanet = CoronaNet(supervised=True)
-    model = coronanet.build_model()
+    siamese_net = SiameseNetwork()
+    model = siamese_net.build_model()
     summary(model['model'])    
-    main(model, train_df, val_df, test_df, pretrained_weights="/MULTIX/DATA/nccid/coronanet_unsupervised_1.pth")
+    main(model, train_df, val_df, test_df) #, pretrained_weights="/MULTIX/DATA/nccid/coronanet_unsupervised_1.pth")
 
 
     

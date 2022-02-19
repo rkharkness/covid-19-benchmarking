@@ -9,6 +9,7 @@ from sklearn.metrics import accuracy_score
 import itertools
 from models.ecovnet import ECovNet
 from models.res_attn import AttentionResNetModified
+from models.siamese_net import SiameseNetwork
 #from models.ac_covidnet import ACCovidNet
 from models.coronet_tfl import CoroNet
 from models.coronanet import CoronaNet
@@ -173,19 +174,19 @@ def train_pytorch(model, dataloader, k, patience=20, pretrained_weights=None):
                 with torch.set_grad_enabled(phase == 'train'):
 
                     pred = classifier(batch_x)
-                    if len(pred[0]) == 2:
+                    if len(pred) == 2:
                         pred, pred_img = pred[0], pred[1] # image, class
-                    if len(pred[0]) == 3: # for unsup coronet
-                        pred, pred_img, z = pred[0], pred[1],pred[3]
+                    if len(pred) == 3: # for unsup coronet
+                        pred, pred_img, z = pred[0], pred[1],pred[2]
                         
                     if supervised == False:
                         loss = loss_fn(pred_img, batch_x) # if unsupervised (no label) - loss_fn input = image
     
                         if model['model_name'] == 'coronet':
                             assert len(pred[0]) > 2
-                            assert all(batch_y.detach.cpu().numpy()==0.0) # double check only training encoder with 
+                            assert all(batch_y.detach().cpu().numpy()==0.0) # double check only training encoder with 
                             pred_z = classifier(pred)
-                            loss_z = loss_fn(pred_z, z)
+                            loss_z = loss_fn(pred_z[2], z)
                             loss = loss  + loss_z
 
                     else:
@@ -408,7 +409,7 @@ def main(model, fold, df, pretrained_weights=None):
 
         params = {'batchsize':24, "num_workers":4, "k":fold}
         
-        train_loader, val_loader, _ = make_generators(model['model_type'], train_df, val_df, test_df, params)
+        train_loader, val_loader, _ = make_generators(model, train_df, val_df, test_df, params)
         # create dict of dataloaders
         x, y = next(iter(train_loader))
         
@@ -455,6 +456,6 @@ if __name__ == "__main__":
     df['xray_status'] = df['xray_status'].map(mapping)
 
     for fold in range(1,6):
-        coronanet = CoronaNet(supervised=True)
-        model = coronanet.build_model()
-        main(model, fold, df, pretrained_weights=f"/MULTIX/DATA/nccid/coronanet_unsupervised_{fold}.pth")
+        siamese_net = SiameseNetwork()
+        model = siamese_net.build_model()
+        main(model, fold, df) #, pretrained_weights=f"/MULTIX/DATA/nccid/coronanet_unsupervised_{fold}.pth")

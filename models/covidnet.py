@@ -1,12 +1,13 @@
 import torch.nn as nn
 import torch.nn.functional as F
-#from covidnet.loss import WeightedBCE
 from torch.optim import Adam
 import torch
 
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
+from torchinfo import summary
+
 
 def nll_loss(output, target):
     return F.nll_loss(output, target)
@@ -32,10 +33,10 @@ class WeightedBCE(nn.Module):
         output = torch.clamp(output,min=1e-10,max=1-1e-10)  
         loss =  self.weights['pos'] * (target * torch.log(output)) + self.weights['neg'] * ((1 - target) * torch.log(1 - output))
         return torch.neg(torch.mean(loss))
+
 class Flatten(nn.Module):
     def forward(self, input):
         return input.reshape(input.size(0),input.size(1)*input.size(2)*input.size(3))
-
 
 class PEPX(nn.Module):
     def __init__(self, n_input, n_out):
@@ -245,3 +246,7 @@ class CovidNet(nn.Module):
         'model_name':self.model_name, 'model_type':self.model_type, 'supervised':self.supervised}
         return model
 
+if __name__ == "__main__":
+  covidnet = CovidNet()
+  model = covidnet.build_model()
+  print(summary(model['model']))
