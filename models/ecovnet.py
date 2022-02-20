@@ -9,6 +9,8 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Input
 from tensorflow.keras.models import Model
 
+from tensorflow.keras.applications.vgg16 import VGG16
+
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.optimizers import SGD
 

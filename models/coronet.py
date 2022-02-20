@@ -20,7 +20,7 @@ class WeightedBCE():
 class FPAE(nn.Module):
     def __init__(self):
         super(FPAE, self).__init__()
-        self.bn0 = nn.BatchNorm2d(1)
+        self.bn0 = nn.BatchNorm2d(3)
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=8, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(num_features=8)
         self.conv2 = nn.Conv2d(in_channels=8, out_channels=16, kernel_size=3, padding=1)
@@ -209,10 +209,10 @@ class CoroNet(nn.Module):
         self.optimizer = 'adam'
 
     def forward(self, x):
-        if self.supervised:
-            output = self.classifier(x)
-        else:
-            output = self.fpae(x) # return list of outputs
+       # if self.supervised:
+        #    output = self.classifier(x)
+       # else:
+        output = self.fpae(x) # return list of outputs
 
         return output 
         
@@ -224,7 +224,7 @@ class CoroNet(nn.Module):
 
 
 if __name__ == "__main__":
-    coronet = CoroNet.build_model()
+    coronet = CoroNet().build_model()
     print(summary(coronet['model']))
 
     

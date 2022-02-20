@@ -1,7 +1,7 @@
 import os
 import shutil
 
-class models_genesis_config:
+class configs:
     model = "Vnet"
     suffix = "genesis_chest_ct"
     exp_name = model + "-" + suffix
