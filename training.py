@@ -31,12 +31,11 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 # - for tf, fastai and pytorch
 # - import dataloaders
 
-
-def train_mag_sd(model, model_name, dataloader, optimizer, loss_fn, patience, supervised=True, pretrained_weights=None):
-    writer = SummaryWriter(model_name)
+def train_mag_sd(model, dataloader, patience=20, pretrained_weights=None):
+    writer = SummaryWriter(model['model_name'])
 
     if (pretrained_weights):
-        model.load_state_dict(torch.load(pretrained_weights))
+        model['model'].load_state_dict(torch.load(pretrained_weights))
 
     loss_dict = {'train': np.zeros(shape=(500,), dtype=np.float32),
                 'val': np.zeros(shape=(500,), dtype=np.float32)}
@@ -45,9 +44,16 @@ def train_mag_sd(model, model_name, dataloader, optimizer, loss_fn, patience, su
                 'val':np.zeros(shape=(500,), dtype=np.float32)}
 
     no_improvement = 0
-    lr = optimizer.lr
+
+    optimizer = model['optimizer']
+    lr = model['lr']
     end_epoch = 0
 
+    supervised = model['supervised']
+
+    loss_fn = model['loss_fn']
+
+    best_val_loss = np.inf
     for epoch in range(500):
         end_epoch =+1
         loss_avg = {'train':[],'val':[]}
@@ -71,32 +77,81 @@ def train_mag_sd(model, model_name, dataloader, optimizer, loss_fn, patience, su
 
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == 'train'):
-                    pred, _ = model.encoder(batch_x)
-                    acc, loss = model.compute_classification_loss(pred, batch_y)
+                    logit_raw, feature_1, attention_map = model['model'].encoder(batch_x)
+
+                    ### batch augs
+                    # mixup
+                    mixup_images = model['model'].batch_augment(batch_x, attention_map[:, 0:1, :, :], mode='mixup', theta=(0.4, 0.6), padding_ratio=0.1)
+                    logit_mixup, _, _ = model['model'].encoder(mixup_images)
+                    #
+                    # # dropping
+                    drop_images = model['model'].batch_augment(batch_x, attention_map[:, 1:2, :, :], mode='dim', theta=(0.2, 0.5))
+                    logit_dim, _, _ = model['model'].encoder(drop_images)
+                    #
+                    # ## patching
+                    patch_images = model['model'].batch_augment(batch_x, attention_map[:, 2:3, :, :], mode='patch', theta=(0.4, 0.6), padding_ratio=0.1)
+                    logit_patch, _, _= model['model'].encoder(patch_images)
+
+                    loss, _, _ = loss_fn([logit_raw, logit_mixup, logit_dim, logit_patch])
 
                     loss.backward()
                     optimizer.step()
+                    
+                    pred = torch.sigmoid(logit_raw)
+
+                    pred_binary = [1 * (x[0].detach().cpu().numpy()>=0.5) for x in pred]
+                    acc = accuracy_score(batch_y.detach().cpu().numpy(), pred_binary)
+                    acc_avg[phase].append(acc)
                 
                 loss_avg[phase].append(loss.item())
                 acc_avg[phase].append(acc[0])
+                loss_avg[phase].append(loss.item())
 
             loss_dict[phase][epoch] = np.mean(loss_avg[phase])
-            acc_dict[phase][epoch] = np.mean(acc_avg[phase])
 
-            writer.add_scalars('loss', {phase: loss_dict[phase][epoch]})
-            writer.add_scalars('accuracy', {phase: acc_dict[phase][epoch]})
+            if len(acc_avg[phase]) > 0:
+              acc_dict[phase][epoch] = np.mean(acc_avg[phase])
+
+            writer.add_scalars('loss', {phase: loss_dict[phase][epoch]}, epoch)
+            writer.add_scalars('accuracy', {phase: acc_dict[phase][epoch]}, epoch)
 
             print(f'-----------{phase}-----------')
             print('Loss  =  {0:.3f}'.format(loss_dict[phase][epoch]))
             print('Acc   =  {0:.3f}'.format(acc_dict[phase][epoch]))
+            
+        plt.plot(range(len(loss_dict['train'][:epoch])), loss_dict['train'][:epoch], 'r')
+        plt.plot(range(len(loss_dict['val'][:epoch])), loss_dict['val'][:epoch], 'b')
+        
+        plt.plot(range(len(acc_dict['train'][:epoch])), acc_dict['train'][:epoch], 'y')
+        plt.plot(range(len(acc_dict['val'][:epoch])), acc_dict['val'][:epoch], 'g')
+               
+        plt.legend(['Training Loss', 'Val Loss', 'Training Acc', 'Val Acc'])
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        if supervised:
+            metrics_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_supervised_metrics_k{k}.png"
+            acc_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_supervised_acc_k{k}.csv"
+            loss_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_supervised_loss_k{k}.csv"
+        else:
+            metrics_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_unsupervised_metrics_k{k}.png"
+            acc_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_unsupervised_acc_k{k}.csv"
+            loss_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_unsupervised_loss_k{k}.csv"
+        
+        plt.savefig(metrics_savepath)
+        
+        loss_df = pd.DataFrame.from_dict(loss_dict)
+        loss_df.to_csv(loss_savepath)
 
-        if loss_avg['val'][epoch] > loss_avg['train'][epoch]:
+        acc_df = pd.DataFrame.from_dict(acc_dict)
+        acc_df.to_csv(acc_savepath)
+
+        if loss_dict['val'][epoch] > best_val_loss:
                 no_improvement += 1
                 print(f"No improvement for {no_improvement}")
 
                 if no_improvement % 5 == 0:
                     lr = lr*0.8
-                    optimizer.lr.assign(lr)
+                    optimizer.param_groups[0]['lr'] = lr
                     print(f"Reducing lr to {lr}")
 
                 if no_improvement == patience:
@@ -104,9 +159,11 @@ def train_mag_sd(model, model_name, dataloader, optimizer, loss_fn, patience, su
                     break
         else:
             no_improvement = 0
-            print(f'saving model weights to {model_name}.h5')
-            model.save_model()
+            print(f"saving model weights to {model['model_name']}_{k}.pth")
+            model['model'].save_model()
 
+            best_val_loss = loss_dict['val'][epoch]
+        
     loss_dict = dict(itertools.islice(loss_dict.items(), end_epoch))
     acc_dict = dict(itertools.islice(acc_dict.items(), end_epoch))
     return loss_dict, acc_dict
@@ -268,7 +325,7 @@ def train_pytorch(model, dataloader, k, patience=20, pretrained_weights=None):
     return loss_dict, acc_dict
 
 
-def train_keras(model, dataloader, k, patience=20, supervised=True, pretrained_weights=None):
+def train_keras(model, dataloader, k, patience=20, pretrained_weights=None):
     # supervised included self-supervised methods i.e. two inputs
     print(f"training {model['model_name']}...")
     print("with model spec & hyperparameters...")
@@ -277,6 +334,8 @@ def train_keras(model, dataloader, k, patience=20, supervised=True, pretrained_w
             pass
         else:
             print(key, value)
+
+    supervised = model['supervised']
 
     writer = SummaryWriter(model['model_name'])
 
@@ -325,7 +384,7 @@ def train_keras(model, dataloader, k, patience=20, supervised=True, pretrained_w
                 else:
                     pred = model['model'].call(batch_x)
                 
-                if len(batch_y[0]) == len(batch_x[0]): # check if batch_y is an image
+                if batch_y[0].shape == batch_x[0].shape: # check if batch_y is an image
                     pass
                     
                 else:
@@ -357,14 +416,23 @@ def train_keras(model, dataloader, k, patience=20, supervised=True, pretrained_w
         plt.legend(['Training Loss', 'Val Loss', 'Training Acc', 'Val Acc'])
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.savefig(f"/MULTIX/DATA/nccid/{model['model_name']}_metrics_k{k}.png")
+
+        if supervised:
+            metrics_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_supervised_metrics_k{k}.png"
+            acc_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_supervised_acc_k{k}.csv"
+            loss_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_supervised_loss_k{k}.csv"
+        else:
+            metrics_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_unsupervised_metrics_k{k}.png"
+            acc_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_unsupervised_acc_k{k}.csv"
+            loss_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_unsupervised_loss_k{k}.csv"
+        
+        plt.savefig(metrics_savepath)
         
         loss_df = pd.DataFrame.from_dict(loss_dict)
-        loss_df.to_csv(f"/MULTIX/DATA/nccid/{model['model_name']}_loss_k{k}.csv")
+        loss_df.to_csv(loss_savepath)
 
         acc_df = pd.DataFrame.from_dict(acc_dict)
-        acc_df.to_csv(f"/MULTIX/DATA/nccid/{model['model_name']}_acc_k{k}.csv")
-
+        acc_df.to_csv(acc_savepath)
 
         if loss_dict['val'][epoch] > best_val_loss:
                 no_improvement += 1
@@ -382,7 +450,13 @@ def train_keras(model, dataloader, k, patience=20, supervised=True, pretrained_w
         else:
             no_improvement = 0
             print(f"saving model weights to {model['model_name']}.h5")
-            model['model'].save_weights(f"/MULTIX/DATA/nccid/{model['model_name']}_{k}.h5")
+
+            if supervised:
+                model_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_supervised_{k}.h5"
+            else:
+                model_savepath = f"/MULTIX/DATA/nccid/{model['model_name']}_unsupervised_{k}.pth"
+            model['model'].save_weights(model_savepath)
+
             best_val_loss = loss_dict['val'][epoch]
 
     loss_dict = dict(itertools.islice(loss_dict.items(), end_epoch))
@@ -407,31 +481,31 @@ def main(model, fold, df, pretrained_weights=None):
         #make generators
         print(train_df['xray_status'].value_counts())
 
-        params = {'batchsize':24, "num_workers":4, "k":fold}
+        params = {'batchsize':64, "num_workers":4, "k":fold}
         
         train_loader, val_loader, _ = make_generators(model, train_df, val_df, test_df, params)
         # create dict of dataloaders
-        x, y = next(iter(train_loader))
+        # x, y = next(iter(train_loader))
         
-        plt.figure()
-        img = x.numpy().flatten()
-        plt.hist(img, bins=20)
-        plt.savefig('/MULTIX/DATA/nccid/pixel_hist.png')
+        # plt.figure()
+        # img = x.numpy().flatten()
+        # plt.hist(img, bins=20)
+        # plt.savefig('/MULTIX/DATA/nccid/pixel_hist.png')
 
-        x, y = next(iter(train_loader))
-        fig = plt.figure(figsize=(4., 4.))
-        grid = ImageGrid(fig, 111,  # similar to subplot(111)
-                        nrows_ncols=(4,4),  # creates 2x2 grid of axes
-                        axes_pad=0.1,  # pad between axes in inch.
-                        )
+        # x, y = next(iter(train_loader))
+        # fig = plt.figure(figsize=(4., 4.))
+        # grid = ImageGrid(fig, 111,  # similar to subplot(111)
+        #                 nrows_ncols=(4,4),  # creates 2x2 grid of axes
+        #                 axes_pad=0.1,  # pad between axes in inch.
+        #                 )
 
-        for ax, im in zip(grid, [x[i] for i in range(len(x)-1)]):
-            # Iterating over the grid returns the Axes.
-            if model['model_type'] == 'pytorch':
-              im = im.permute(1,2,0)
-            else:
-              ax.imshow(im)
-        plt.savefig('/MULTIX/DATA/nccid/batch_img.png')
+        # for ax, im in zip(grid, [x[i] for i in range(len(x)-1)]):
+        #     # Iterating over the grid returns the Axes.
+        #     if model['model_type'] == 'pytorch':
+        #       im = im.permute(1,2,0)
+        #     else:
+        #       ax.imshow(im)
+        # plt.savefig('/MULTIX/DATA/nccid/batch_img.png')
 
 
         dataloaders = {'train':train_loader, 'val':val_loader}
