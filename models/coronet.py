@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 from torchvision import models
-from torchsummary import summary
+from torchinfo import summary
 
 class WeightedBCE():
     def  __init__(self) -> None:
@@ -188,46 +188,55 @@ class Classifier(nn.Module):
         return x
 
 class CoroNet(nn.Module):
-    supervised = False
-    def __init__(self, supervised=supervised):
+    def __init__(self, supervised, pretrained=None):
         super(CoroNet, self).__init__()
 
+        self.fpae = FPAE()
+        self.classifier = Classifier()
+
+        self.pretrained = pretrained
         self.supervised = supervised
 
+        if self.pretrained:
+            self.fpae = FPAE().requires_grad_(False)
+         #   self.fpae.load_state_dict(torch.load(self.pretrained))
+
         if self.supervised:
+            assert self.pretrained
             self.loss_fn = WeightedBCE()
             self.lr = 1e-4
         else:
             self.loss_fn = nn.MSELoss()
-            self.lr = 1e-5
-
-        self.fpae = FPAE()
-        self.classifier = Classifier()
+            self.lr = 1e-3
 
         self.model_name = 'coronet'
         self.model_type = 'pytorch'
         self.optimizer = 'adam'
 
     def forward(self, x):
-       # if self.supervised:
-        #    output = self.classifier(x)
-       # else:
-        output = self.fpae(x) # return list of outputs
+        if self.supervised:
+            for param in self.fpae.parameters():
+                param.requires_grad = False
+
+            output_1, org, z = self.fpae(x)
+            output = self.classifier(torch.abs(output_1-org))
+
+        else:
+            output = self.fpae(x) # return list of outputs
 
         return output 
         
     def build_model(self):
-        model = CoroNet()
+        model = CoroNet(supervised=self.supervised, pretrained=self.pretrained)
         model = {'model':model, 'optimizer':self.optimizer, 'loss_fn':self.loss_fn, 'lr':self.lr,
         'model_name':self.model_name, 'model_type':self.model_type, 'supervised':self.supervised}
         return model
 
 
 if __name__ == "__main__":
-    coronet = CoroNet().build_model()
+    coronet = CoroNet(supervised=True, pretrained="/MUTLIX/DATA/nccid/coronet_unsupervised_1.pth").build_model()
+    coronet['model'].cuda()
     print(summary(coronet['model']))
-
-    
 
 
 

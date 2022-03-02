@@ -1,4 +1,5 @@
 # import required libraries
+from tkinter import Y
 from tensorflow.keras.applications.vgg16 import VGG16
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Input, Flatten, Lambda, Dropout
@@ -62,9 +63,11 @@ class SiameseNetwork():
         self.optimizer = Adam()
 
         if self.pretrained:
+            assert self.supervised == False
             self.lr = 1e-4
             self.loss_fn = loss(margin=1.25)
         else:
+            assert self.supervised == True
             self.lr = 1e-4
             self.loss_fn = WeightedBCE()
 
@@ -85,19 +88,18 @@ class SiameseNetwork():
 
             embedding_network = self.build_encoder()
             embedding_network.load_weights(self.pretrained)
-            embedding_network.trainable = False
+            embedding_network.trainable = True
 
             model = tf.keras.Sequential() 
             for layer in embedding_network.layers: # might neeed to remove last layer? 
                 model.add(layer) 
 
             model.add(Flatten(name='flat'))
-            model.add(Dropout(0.5)) # training=self.dropout_act))
             model.add(Dense(5120, name='den', activation='sigmoid', kernel_regularizer='l2')) 
+            model.add(Dropout(0.5)) # training=self.dropout_act))
 
-            output_1 = embedding_network(input_1)
-            output_2 = embedding_network(input_2)
-
+            output_1 = model(input_1)
+            output_2 = model(input_2)
             merge_layer = Lambda(manhattan_distance)([output_1, output_2]) 
             output_layer = Dense(1, activation="sigmoid")(merge_layer)
 
@@ -108,7 +110,6 @@ class SiameseNetwork():
         
         return {'model':self.model, 'optimizer':self.optimizer, 'loss_fn':self.loss_fn, 'lr':self.lr,
         'model_name':self.model_name, 'model_type':self.model_type, 'supervised':self.supervised, 'pretrained':self.pretrained}
-
 
 
     def call(self, inputs):
