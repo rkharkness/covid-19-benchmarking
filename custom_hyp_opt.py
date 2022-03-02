@@ -2,11 +2,13 @@
 #from models.ecovnet import ECovNet
 #from models.ac_covidnet import ACCovidNet
 #from models.res_attn import AttentionResNetModified
-from models.coronanet import CoronaNet
-from models.coronet import CoroNet
+#from models.coronanet import CoronaNet
+#from models.coronet import CoroNet
 from models.siamese_net import SiameseNetwork
+from models.mag_sd import MAG_SD, config
 import matplotlib.pyplot as plt
-from torchinfo import summary
+#from torchinfo import summary
+#import traceback
 
 import pandas as pd
 import numpy as np
@@ -21,6 +23,7 @@ from torch import optim
 import tensorflow.keras as keras
 from tensorflow.keras.optimizers import Adam
 import tensorflow as tf
+import tensorflow.keras.backend as K
 
 
 def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
@@ -33,7 +36,7 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
     
     # make generators
     fold = 1
-    params = {'batchsize':24, "num_workers":8, "k":fold}
+    params = {'batchsize':24, "num_workers":4, "k":fold}
 
     train_loader, val_loader, _ = make_generators(model, train_df, val_df, test_df, params)
     # create dict of dataloaders
@@ -45,12 +48,11 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
       optimizer.learning_rate =lr
       loss_dict = {'train': [],'val': []}
 
-
       for epoch in range(10):
           print(f'epoch - {epoch}')
           loss_avg = {'train':[],'val':[]}
           for phase in ['train', 'val']:
-              for batch in dataloader[phase]:
+              for batch in tqdm(dataloader[phase]):
                   if len(batch) > 1:
                       batch_x, batch_y = batch # batch_y can be paired image
                       with tf.GradientTape() as tape:
@@ -106,6 +108,9 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
             optimizer = torch.optim.Adam(classifier.parameters(), lr=lr)
             print('adam', lr)
 
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+
         if (pretrained_weights):
             print(f'loading pretrained weights - {pretrained_weights}')
             classifier.load_state_dict(torch.load(pretrained_weights)) # load ae weights for coronet
@@ -135,9 +140,32 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
                     batch_x, batch_y = batch
                     batch_y = batch_y.to(device)
                     batch_x = batch_x.to(device)
+
                     optimizer.zero_grad()
                     with torch.set_grad_enabled(phase == 'train'):
-                        pred = classifier(batch_x)
+                        if model['model_name']=='mag_sd':
+                            pred = []
+                            logit_raw, feature_1, attention_map = model['model'].encoder(batch_x)
+
+                            ### batch augs
+                            # mixup
+                            mixup_images = model['model'].batch_augment(batch_x, attention_map[:, 0:1, :, :], mode='mixup', theta=(0.4, 0.6), padding_ratio=0.1)
+                            logit_mixup, _, _ = model['model'].encoder(mixup_images)
+                            #
+                            # # dropping
+                            drop_images = model['model'].batch_augment(batch_x, attention_map[:, 1:2, :, :], mode='dim', theta=(0.2, 0.5))
+                            logit_dim, _, _ = model['model'].encoder(drop_images)
+                            #
+                            # ## patching
+                            patch_images = model['model'].batch_augment(batch_x, attention_map[:, 2:3, :, :], mode='patch', theta=(0.4, 0.6), padding_ratio=0.1)
+                            logit_patch, _, _= model['model'].encoder(patch_images)
+
+                            loss, _, _ = loss_fn([logit_raw, logit_mixup, logit_dim, logit_patch], batch_y)
+                            print('1', loss)
+                            
+                         #   pred = torch.sigmoid(logit_raw)
+                        else:
+                            pred = classifier(batch_x)
 
                         if len(pred) == 2:
                             pred, pred_img = pred[0], pred[1] # image, class
@@ -156,24 +184,27 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
                                 loss = loss  + loss_z
                                 
                         else:
-                            loss = loss_fn(batch_y.long(),pred) # if unsupervised (no label) - loss_fn input = class pred
+                            if model['model_name']=='mag_sd':
+                             #   print(phase, loss)
+                                pass
+                            else:
+                                loss = loss_fn(batch_y.long(),pred) # if unsupervised (no label) - loss_fn input = class pred
 
                         if phase == 'train':
                             loss.backward()
                             optimizer.step()
 
-                        
                     loss_avg[phase].append(loss.item())
                 
                 loss_dict[phase][epoch] = np.mean(loss_avg[phase])
         
-            plt.plot(range(len(loss_dict['train'][:epoch])), loss_dict['train'][:epoch], 'r')
-            plt.plot(range(len(loss_dict['val'][:epoch])), loss_dict['val'][:epoch], 'b')
+            # plt.plot(range(len(loss_dict['train'][:epoch])), loss_dict['train'][:epoch], 'r')
+            # plt.plot(range(len(loss_dict['val'][:epoch])), loss_dict['val'][:epoch], 'b')
 
-            plt.legend(['Training Loss', 'Val Loss'])
-            plt.xlabel('Epoch')
-            plt.ylabel('Loss')
-            plt.savefig(f"/MULTIX/DATA/nccid/{model['model_name']}_lr_{lr}_hp metrics_epoch.png")          
+            # plt.legend(['Training Loss', 'Val Loss'])
+            # plt.xlabel('Epoch')
+            # plt.ylabel('Loss')
+            # plt.savefig(f"/MULTIX/DATA/nccid/{model['model_name']}_lr_{lr}_hp_metrics_epoch.png")          
             
             if loss_dict['val'][epoch] < best_val_loss:
                 best_val_loss = loss_dict['val'][epoch]
@@ -192,6 +223,9 @@ def objective(lr, model, train_df, val_df, test_df, pretrained_weights=None):
 
         return best_val_loss
 
+def weight_reset(m):
+    if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
+        m.reset_parameters()
 
 def main(model, train_df, val_df, test_df, pretrained_weights=None):
     
@@ -202,6 +236,10 @@ def main(model, train_df, val_df, test_df, pretrained_weights=None):
         all_best_vals.append(best_val)
 
         print(f'trial {lr} completed - best val loss: {best_val}')
+        if model['model_type']=='keras':
+            K.clear_session()
+        else:
+            model['model'].apply(weight_reset)
 
     results = pd.DataFrame()
     results['trial_lr'] = trial_lr
@@ -229,10 +267,13 @@ if __name__ == "__main__":
     val_df = df[df['kfold_1'] == "val"]
     test_df = df[df['kfold_1'] == 'test']
 
-    siamese_net = SiameseNetwork()
-    model = siamese_net.build_model()
-    summary(model['model'])    
-    main(model, train_df, val_df, test_df) #, pretrained_weights="/MULTIX/DATA/nccid/coronanet_unsupervised_1.pth")
+   # coronet = CoroNet(supervised=True, pretrained="/MULTIX/DATA/nccid/coronet_unsupervised_1.pth")
+    #model = coronet.build_model()
+
+    mag_sd = MAG_SD(config)
+    model = mag_sd.build_model()
+#
+    main(model, train_df, val_df, test_df) # pretrained_weights="/MULTIX/DATA/nccid/coronanet_unsupervised_1.pth")
 
 
     

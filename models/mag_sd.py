@@ -1,4 +1,5 @@
 import argparse
+from statistics import mode
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -106,12 +107,12 @@ def batch_augment(images, attention_map, mode='mixup', theta=0.5, padding_ratio=
             auged_image[:, :,H_patch:H_patch+(height_max-height_min), W_patch:W_patch+(width_max-width_min)] = patch
             multi_image.append(auged_image)
 
-            import matplotlib.pyplot as plt
-            plt.subplot(2,1,1)
-            plt.imshow(patch[0][0].squeeze().cpu().numpy(), cmap='gray')
-            plt.subplot(2,1,2)
-            plt.imshow(auged_image[0][0].squeeze().cpu().numpy(), cmap='gray')
-            plt.show()
+            # import matplotlib.pyplot as plt
+            # plt.subplot(2,1,1)
+            # plt.imshow(patch[0][0].squeeze().cpu().numpy(), cmap='gray')
+            # plt.subplot(2,1,2)
+            # plt.imshow(auged_image[0][0].squeeze().cpu().numpy(), cmap='gray')
+            # plt.show()
 
         multi_images = torch.cat(multi_image, dim=0)
         return multi_images
@@ -120,9 +121,9 @@ def batch_augment(images, attention_map, mode='mixup', theta=0.5, padding_ratio=
         raise ValueError('Expected mode in [\'crop\', \'drop\'], but received unsupported augmentation method %s' % mode)
 
 
-class WeightedBCE():
+class WeightedBCE(nn.Module):
     def  __init__(self) -> None:
-        super().__init__()
+        super(WeightedBCE, self).__init__()
         self.weights = {'neg':1.32571275, 'pos':0.80276873}
     
     def forward(self, target, output):
@@ -130,11 +131,48 @@ class WeightedBCE():
         loss =  self.weights['pos'] * (target * torch.log(output)) + self.weights['neg'] * ((1 - target) * torch.log(1 - output))
         return torch.neg(torch.mean(loss))
 
-class MAGLoss():
+class MAGLoss(nn.Module):
     def __init__(self):
-        self.bce = WeightedBCE()
+        super(MAGLoss, self).__init__()
+
+        # init_criterions
+        self.MSELoss = torch.nn.MSELoss()
+        self.L1Loss = torch.nn.L1Loss(reduction='mean')
+        self.SoftMax = nn.Softmax(dim=1)
         self.device = 'cuda'
-    
+        self.CrossEntropyLoss = torch.nn.CrossEntropyLoss(weight=torch.tensor([1.32571275,0.80276873], dtype=torch.float).to(self.device), reduction='mean')
+
+    def gen_refine_loss(self, pred0,pred1,pred2,pred3, targets):
+        targets = self.onehot_2_label(targets)
+        pred0_sm = self.SoftMax(pred0).detach()
+        pred1_sm = self.SoftMax(pred1)
+        pred2_sm = self.SoftMax(pred2)
+        pred3_sm = self.SoftMax(pred3)
+
+        for i, vector_pred0 in enumerate(pred0_sm):
+            if torch.argmax(vector_pred0)!=targets[i] or torch.max(vector_pred0)<0.7:
+                vector_alter = torch.ones_like(vector_pred0) * 0.01
+                vector_alter[targets[i]] = 1 - len(vector_alter) * 0.01
+                pred0_sm[i] = vector_alter
+        loss0 = self.CrossEntropyLoss(pred0,targets)
+        variance01 = self.L1Loss(pred0_sm, pred1_sm)
+        variance02 = self.L1Loss(pred0_sm, pred2_sm)
+        variance03 = self.L1Loss(pred0_sm, pred3_sm)
+        loss_tensor = (variance01+variance02+variance03)+loss0
+        loss_tensor.to(self.device)
+        return loss_tensor
+
+    def compute_classification_loss(self, logits, one_hot_pids):
+        # one-hot2label
+        label_pids = self.onehot_2_label(one_hot_pids)
+        #loss and top-3 acc
+        loss_i = self.CrossEntropyLoss(logits, label_pids)
+        acc = self.accuracy(logits, label_pids, topk=(1,))
+        return acc, loss_i
+
+    def onehot_2_label(self, one_hot):
+        return torch.argmax(one_hot, -1)
+
     def accuracy(self, logits, target, topk=(1, 3)):
         maxk = max(topk)
         batch_size = target.size(0)
@@ -147,35 +185,6 @@ class MAGLoss():
             res.append(correct_k / batch_size)
         return res
 
-    def gen_refined_loss(self, pred0, pred1, pred2, pred3, targets):
-        pred0_sm = torch.sigmoid(pred0).detach()
-        pred1_sm = torch.sigmoid(pred1)
-        pred2_sm = torch.sigmoid(pred2)
-        pred3_sm = torch.sigmoid(pred3)
-
-        for i, vector_pred0 in enumerate(pred0_sm):
-            if torch.argmax(vector_pred0)!=targets[i] or torch.max(vector_pred0)<0.7:
-                vector_alter = torch.ones_like(vector_pred0) * 0.01
-                vector_alter[targets[i]] = 1 - len(vector_alter) * 0.01
-                pred0_sm[i] = vector_alter
-
-        loss0 = self.bce(pred0,targets)
-        variance01 = F.l1_loss(pred0_sm, pred1_sm)
-        variance02 = F.l1_loss(pred0_sm, pred2_sm)
-        variance03 = F.l1_loss(pred0_sm, pred3_sm)
-        loss_tensor = (variance01+variance02+variance03)+loss0
-        loss_tensor.to(self.device)
-        
-        return loss_tensor
-
-    def compute_classification_loss(self, logits, inputs):
-        # one-hot2label
-      #  label_pids = self.onehot_2_label(one_hot_pids)
-        #loss and top-3 acc
-        loss_i = self.bce(logits, inputs)
-        acc = self.accuracy(logits, inputs, topk=(1,))
-        return acc, loss_i
-
     def forward(self, pred, batch_y):
         logit_raw, logit_mixup, logit_dim, logit_patch = pred
 
@@ -184,7 +193,7 @@ class MAGLoss():
         acc_dim, loss_dim = self.compute_classification_loss(logit_dim, batch_y)
         acc_patch, loss_patch = self.compute_classification_loss(logit_patch, batch_y)
 
-        loss = self.gen_refine_loss(logit_raw, logit_mixup, logit_dim, logit_patch, batch_y)
+        loss = self.gen_refined_loss(logit_raw, logit_mixup, logit_dim, logit_patch, batch_y)
         variance = loss - loss_raw
 
         return loss, ['acc_raw', 'loss_raw', 'acc_mixup','loss_mixup','acc_dim','loss_dim','acc_patch','loss_patch','loss_v', 'variance'], \
@@ -258,7 +267,7 @@ class res50Encoder(nn.Module):
         self.fc = nn.Linear(2048*config['attention_map_num'], config['class_num'], bias=False)
 
         # features
-        resnet.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        resnet.conv1 = nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         self.resnet_encoder = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool,
                                          resnet.layer1, resnet.layer2)
         self.resnet_encoder3 = resnet.layer3
@@ -310,17 +319,18 @@ class res50Encoder(nn.Module):
         return logits, features_1, attention_map
 
 class MAG_SD(nn.Module):
-    def __init__(self, config, batch_augment=batch_augment):
+    def __init__(self, config, mode='train', batch_augment=batch_augment):
         super(MAG_SD, self).__init__()
         self.model_name = "mag_sd"
         self.model_type = "pytorch"
         self.supervised = True        
         self.loss_fn = MAGLoss()
 
-        self.lr = 1e-4 
+        self.lr = 1e-3
 
         self.config = config
 
+        self.mode = mode
         self.batch_augment = batch_augment
 
         # dataset configuration
@@ -391,7 +401,7 @@ class MAG_SD(nn.Module):
             self.model_list[ii] = self.model_list[ii].eval()
 
 
-config = {'mode':'train', 'save_model_path': '/MULTIX/DATA/nccid/','class_num':1, 'attention_map_num':32,'image_size':480,'joint_training_steps':150}
+config = {'mode':'train', 'save_model_path': '/MULTIX/DATA/nccid/','class_num':2, 'attention_map_num':32,'image_size':480,'joint_training_steps':150}
 
 from torchinfo import summary
 if __name__ == "__main__":

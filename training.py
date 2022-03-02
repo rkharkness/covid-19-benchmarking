@@ -66,14 +66,10 @@ def train_mag_sd(model, dataloader, patience=20, pretrained_weights=None):
                 model.set_eval()
 
             for batch in tqdm(range(len(dataloader[phase]))):
-                if len(batch) > 1:
-                    batch_x, batch_y = batch
-                    batch_x.to(device)
-                    batch_y.to(device)
-                
-                else:
-                    batch_x = batch # assume image input
-                    batch_x.to(device)
+                batch_x, batch_y = batch
+                batch_x.to(device)
+                batch_y.to(device)
+  
 
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == 'train'):
@@ -194,7 +190,7 @@ def train_pytorch(model, dataloader, k, patience=20, pretrained_weights=None):
     loss_fn = model['loss_fn']
 
     if model['optimizer'] == 'adam':
-      optimizer = torch.optim.Adam(classifier.parameters(), lr=model['lr'])
+      optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, classifier.parameters()), lr=model['lr'])
 
     if (pretrained_weights):
         classifier.load_state_dict(torch.load(pretrained_weights)) # load ae weights for coronet
@@ -530,6 +526,9 @@ if __name__ == "__main__":
     df['xray_status'] = df['xray_status'].map(mapping)
 
     for fold in range(1,6):
-        siamese_net = SiameseNetwork()
-        model = siamese_net.build_model()
+        coronet = CoroNet(supervised=True, pretrained="/MULTIX/DATA/nccid/coronet_unsupervised_1.pth")
+        model = coronet.build_model()
+
+        from torchinfo import summary
+        summary(model['model'])    
         main(model, fold, df) #, pretrained_weights=f"/MULTIX/DATA/nccid/coronanet_unsupervised_{fold}.pth")
